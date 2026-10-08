@@ -1,25 +1,64 @@
 #!/bin/bash
-# Setup for an Intel Mac on macOS 10.13. Each install continues on failure. A summary prints at the end.
+# Setup for an Intel Mac on macOS 10.13 with MacPorts. Each install continues on failure. A summary prints at the end.
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
-ok=() fail=() skip=()
+TMP="$(mktemp -d)"
+MACOS="$(sw_vers -productVersion)"
+ok=() fail=() warn=()
 
-if ! command -v brew >/dev/null && [[ ! -x /usr/local/bin/brew && ! -x /opt/homebrew/bin/brew ]]; then
-  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+if ! xcode-select -p >/dev/null 2>&1; then
+  xcode-select --install
+  echo "Finish the Command Line Tools install in the popup. Then run this script again."
+  exit 1
 fi
-for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do [[ -x "$b" ]] && eval "$("$b" shellenv)" && break; done
-command -v brew >/dev/null || { echo "Homebrew install failed. Stopping."; exit 1; }
 
-for f in git zsh tmux neovim starship eza bat fzf fd zoxide lazygit ripgrep direnv; do
-  if brew install "$f"; then ok+=("$f"); else fail+=("$f"); fi
+sudo -v
+
+if [[ ! -x /opt/local/bin/port ]]; then
+  curl -fL -o "$TMP/MacPorts.pkg" https://github.com/macports/macports-base/releases/download/v2.12.6/MacPorts-2.12.6-10.13-HighSierra.pkg
+  sudo installer -pkg "$TMP/MacPorts.pkg" -target / || { echo "MacPorts install failed. Stopping."; exit 1; }
+fi
+export PATH="/opt/local/bin:/opt/local/sbin:$PATH"
+sudo port -N selfupdate
+
+# ponytail: lazygit is not in the list because its MacPorts build fails on 10.13
+for p in git zsh tmux neovim starship eza bat fzf fd ripgrep zoxide direnv; do
+  if sudo port -N install "$p"; then ok+=("$p"); else fail+=("$p"); fi
 done
 
-for c in minecraft roblox discord zoom font-jetbrains-mono-nerd-font; do
-  if brew install --cask "$c"; then ok+=("$c"); else fail+=("$c"); fi
-done
+# Check that an installed app supports this macOS, from LSMinimumSystemVersion in its Info.plist
+check_min() {
+  local min
+  min="$(defaults read "$1/Contents/Info" LSMinimumSystemVersion 2>/dev/null)" || return 0
+  zsh -c "autoload is-at-least; is-at-least $min $MACOS" || warn+=("$(basename "$1") needs macOS $min+")
+}
 
-# ponytail: these casks require a newer macOS than 10.13 (from the brew cask metadata), so the script does not try them
-skip=("helium-browser (needs macOS 13+)" "whatsapp (needs macOS 12+)" "vorssaint (needs macOS 14+)" "ghostty (needs macOS 13+)")
+install_dmg() { # name url
+  local mnt="$TMP/mnt-$1" app
+  curl -fL -o "$TMP/$1.dmg" "$2" && hdiutil attach -nobrowse -quiet -mountpoint "$mnt" "$TMP/$1.dmg" || return 1
+  app="$(find "$mnt" -maxdepth 1 -name '*.app' | head -1)"
+  [[ -n "$app" ]] && sudo cp -R "$app" /Applications/
+  local rc=$?
+  hdiutil detach -quiet "$mnt"
+  [[ $rc -eq 0 ]] && check_min "/Applications/$(basename "$app")"
+  return $rc
+}
+
+if install_dmg Minecraft https://launcher.mojang.com/download/Minecraft.dmg; then ok+=(minecraft); else fail+=(minecraft); fi
+if install_dmg Discord "https://discord.com/api/download?platform=osx"; then ok+=(discord); else fail+=(discord); fi
+
+if curl -fL -o "$TMP/Zoom.pkg" https://zoom.us/client/latest/Zoom.pkg && sudo installer -pkg "$TMP/Zoom.pkg" -target /; then
+  ok+=(zoom); check_min /Applications/zoom.us.app
+else fail+=(zoom); fi
+
+rbx="$(curl -fsSL https://clientsettingscdn.roblox.com/v2/client-version/MacPlayer | sed -n 's/.*"clientVersionUpload":"\([^"]*\)".*/\1/p')"
+if [[ -n "$rbx" ]] && curl -fL -o "$TMP/Roblox.zip" "https://setup.rbxcdn.com/mac/$rbx-RobloxPlayer.zip" && sudo ditto -x -k "$TMP/Roblox.zip" /Applications; then
+  ok+=(roblox); check_min /Applications/RobloxPlayer.app
+else fail+=(roblox); fi
+
+if curl -fL -o "$TMP/font.zip" https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip && unzip -o -q "$TMP/font.zip" '*.ttf' -d ~/Library/Fonts; then
+  ok+=(jetbrains-mono-nerd-font)
+else fail+=(jetbrains-mono-nerd-font); fi
 
 backup() { [[ -e "$1" ]] && mv "$1" "$1.bak.$(date +%s)"; }
 backup ~/.zshrc;          cp "$DIR/zshrc" ~/.zshrc
@@ -30,11 +69,17 @@ backup ~/.config/nvim;    cp -R "$DIR/nvim" ~/.config/nvim
 
 [[ -d ~/.tmux/plugins/tpm ]] || git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 
-[[ "$SHELL" == "/bin/zsh" ]] || chsh -s /bin/zsh
+# The zinit plugins need a newer zsh than the 10.13 system zsh, so use the MacPorts zsh as the login shell
+if [[ -x /opt/local/bin/zsh ]]; then
+  grep -qx /opt/local/bin/zsh /etc/shells || echo /opt/local/bin/zsh | sudo tee -a /etc/shells >/dev/null
+  chsh -s /opt/local/bin/zsh
+fi
 
+rm -rf "$TMP"
 echo
 echo "===== SUMMARY ====="
 echo "Installed: ${ok[*]:-none}"
 echo "Failed:    ${fail[*]:-none}"
-printf 'Skipped:   %s\n' "${skip[@]}"
+[[ ${#warn[@]} -gt 0 ]] && printf 'Will not open on macOS %s: %s\n' "$MACOS" "${warn[@]}"
+echo "Skipped:   helium-browser (needs macOS 13+), whatsapp (12+), vorssaint (14+), ghostty (13+)"
 echo "Open a new terminal. In tmux, press Ctrl+Space then I to install the tmux plugins."

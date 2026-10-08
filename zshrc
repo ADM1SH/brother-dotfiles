@@ -1,7 +1,6 @@
-# Homebrew environment setup (Intel: /usr/local, Apple Silicon: /opt/homebrew)
-for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-  [[ -x "$brew_bin" ]] && eval "$("$brew_bin" shellenv)" && break
-done
+# MacPorts environment setup
+export PATH="/opt/local/bin:/opt/local/sbin:$PATH"
+export MANPATH="/opt/local/share/man:${MANPATH:-}"
 
 # ============================================================================
 # Zinit Plugin Manager
