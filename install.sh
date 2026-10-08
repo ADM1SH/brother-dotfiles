@@ -46,6 +46,8 @@ install_dmg() { # name url
 
 if install_dmg Minecraft https://launcher.mojang.com/download/Minecraft.dmg; then ok+=(minecraft); else fail+=(minecraft); fi
 if install_dmg Discord "https://discord.com/api/download?platform=osx"; then ok+=(discord); else fail+=(discord); fi
+# ponytail: Firefox ESR 115 is the last Firefox branch for macOS 10.12-10.14
+if install_dmg Firefox "https://download.mozilla.org/?product=firefox-esr115-latest-ssl&os=osx&lang=en-US"; then ok+=(firefox-esr115); else fail+=(firefox-esr115); fi
 
 if curl -fL -o "$TMP/Zoom.pkg" https://zoom.us/client/latest/Zoom.pkg && sudo installer -pkg "$TMP/Zoom.pkg" -target /; then
   ok+=(zoom); check_min /Applications/zoom.us.app
