@@ -35,12 +35,17 @@ check_min() {
 
 install_dmg() { # name url
   local mnt="$TMP/mnt-$1" app
-  curl -fL -o "$TMP/$1.dmg" "$2" && hdiutil attach -nobrowse -quiet -mountpoint "$mnt" "$TMP/$1.dmg" || return 1
+  curl -fL --connect-timeout 30 -o "$TMP/$1.dmg" "$2" && hdiutil attach -nobrowse -quiet -mountpoint "$mnt" "$TMP/$1.dmg" || return 1
   app="$(find "$mnt" -maxdepth 1 -name '*.app' | head -1)"
-  [[ -n "$app" ]] && sudo cp -R "$app" /Applications/
+  if [[ -n "$app" ]]; then
+    sudo cp -R "$app" /Applications/
+  else
+    app="$(find "$mnt" -maxdepth 1 -name '*.pkg' | head -1)"
+    [[ -n "$app" ]] && sudo installer -pkg "$app" -target /
+  fi
   local rc=$?
   hdiutil detach -quiet "$mnt"
-  [[ $rc -eq 0 ]] && check_min "/Applications/$(basename "$app")"
+  [[ $rc -eq 0 && "$app" == *.app ]] && check_min "/Applications/$(basename "$app")"
   return $rc
 }
 
@@ -48,6 +53,8 @@ if install_dmg Minecraft https://launcher.mojang.com/download/Minecraft.dmg; the
 if install_dmg Discord "https://discord.com/api/download?platform=osx"; then ok+=(discord); else fail+=(discord); fi
 # ponytail: Firefox ESR 115 is the last Firefox branch for macOS 10.12-10.14
 if install_dmg Firefox "https://download.mozilla.org/?product=firefox-esr115-latest-ssl&os=osx&lang=en-US"; then ok+=(firefox-esr115); else fail+=(firefox-esr115); fi
+if install_dmg VLC https://get.videolan.org/vlc/3.0.24/macosx/vlc-3.0.24-intel64.dmg; then ok+=(vlc); else fail+=(vlc); fi
+if install_dmg XScreenSaver https://www.jwz.org/xscreensaver/xscreensaver-6.16.dmg; then ok+=(xscreensaver); else fail+=(xscreensaver); fi
 
 if curl -fL -o "$TMP/Zoom.pkg" https://zoom.us/client/latest/Zoom.pkg && sudo installer -pkg "$TMP/Zoom.pkg" -target /; then
   ok+=(zoom); check_min /Applications/zoom.us.app
